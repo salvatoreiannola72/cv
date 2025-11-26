@@ -558,6 +558,12 @@ const Candidates = () => {
                               <Mail className="h-3 w-3" />
                               {candidate.email}
                             </span>
+                            {candidate.phone && (
+                              <span className="flex items-center gap-1">
+                                <Phone className="h-3 w-3" />
+                                {candidate.phone}
+                              </span>
+                            )}
                             {candidate.location && (
                               <span className="flex items-center gap-1">
                                 <MapPin className="h-3 w-3" />

@@ -248,7 +248,7 @@ const CandidateDetail = () => {
           
           {/* Column 1: Profile Info */}
           <div className="flex items-start gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="rounded-full mt-3 shrink-0 -ml-14">
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="rounded-full shrink-0 -ml-14 bg-white">
               <ArrowLeft className="h-6 w-6" />
             </Button>
             
