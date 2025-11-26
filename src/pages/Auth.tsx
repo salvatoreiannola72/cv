@@ -103,7 +103,7 @@ const Auth = () => {
     <div className="min-h-screen flex items-center justify-center bg-[#F9FAFB]">
       <Card className="w-full max-w-md border-none shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] rounded-[20px]">
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-2xl font-bold tracking-tight text-gray-900">Hireight</CardTitle>
+          <CardTitle className="text-2xl font-bold tracking-tight text-gray-900">Hiresight</CardTitle>
           <CardDescription className="text-gray-500">
             Piattaforma di gestione candidature
           </CardDescription>
