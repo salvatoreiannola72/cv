@@ -1,4 +1,9 @@
 import os
+import sys
+
+# Add current directory to sys.path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import time
 import json
 import yaml

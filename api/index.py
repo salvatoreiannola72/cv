@@ -1,8 +1,13 @@
+import os
+import sys
+
+# Add current directory to sys.path to allow importing sibling modules in Vercel
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import process_cvs
-import os
 
 app = FastAPI()
 
