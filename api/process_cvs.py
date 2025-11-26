@@ -10,7 +10,7 @@ import yaml
 from supabase import create_client, Client
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
-from llm_factory import LLMFactory
+from .llm_factory import LLMFactory
 
 # Load environment variables
 load_dotenv()
