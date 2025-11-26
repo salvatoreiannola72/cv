@@ -220,6 +220,17 @@ const Candidates = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Utente non autenticato");
 
+      // Check for duplicate email
+      const { data: existingCandidate } = await supabase
+        .from("candidates")
+        .select("id")
+        .eq("email", formData.email)
+        .maybeSingle();
+
+      if (existingCandidate) {
+        throw new Error("Un candidato con questa email esiste già.");
+      }
+
       let cvUrl = null;
       if (formData.cv_file) {
         const fileExt = formData.cv_file.name.split(".").pop();
