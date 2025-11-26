@@ -36,7 +36,7 @@ try:
         llm_config = config.get("llm", {})
 except FileNotFoundError:
     print("Config file not found, using defaults.")
-    llm_config = {"provider": "google", "model": "gemini-1.5-flash"}
+    llm_config = {"provider": "google", "model": "gemini-2.5-flash"}
 
 # Initialize LLM Provider
 try:
