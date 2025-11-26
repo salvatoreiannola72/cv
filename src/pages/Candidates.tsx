@@ -71,11 +71,7 @@ const Candidates = () => {
     loadJobPostings();
   }, []);
 
-  useEffect(() => {
-    if (selectedJobId) {
-      loadCandidates();
-    }
-  }, [selectedJobId]);
+  const [analyzing, setAnalyzing] = useState(false);
 
   const checkAuth = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -138,6 +134,67 @@ const Candidates = () => {
     }
   };
 
+  const triggerAnalysis = async (silent: boolean = false) => {
+    if (!selectedJobId) return;
+    
+    setAnalyzing(true);
+    if (!silent) {
+      toast({
+        title: "Analisi avviata",
+        description: "L'analisi dei CV è in corso. Potrebbe richiedere qualche minuto...",
+      });
+    }
+
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ job_id: selectedJobId }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Errore nella comunicazione con il server");
+      }
+
+      const result = await response.json();
+      
+      if (!silent) {
+        toast({
+          title: "Analisi completata",
+          description: "I punteggi sono stati aggiornati.",
+        });
+      }
+      
+      loadCandidates();
+    } catch (error) {
+      console.error("Errore analisi:", error);
+      if (!silent) {
+        toast({
+          variant: "destructive",
+          title: "Errore",
+          description: "Impossibile completare l'analisi. Assicurati che il backend sia in esecuzione.",
+        });
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  useEffect(() => {
+    checkAuth();
+    loadJobPostings();
+  }, []);
+
+  useEffect(() => {
+    if (selectedJobId) {
+      loadCandidates();
+      // Trigger silent analysis on load/job change
+      triggerAnalysis(true);
+    }
+  }, [selectedJobId]);
+
   const handleUploadCandidate = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -185,7 +242,9 @@ const Candidates = () => {
       });
 
       setDialogOpen(false);
-      loadCandidates();
+      // Trigger analysis after upload
+      triggerAnalysis(false);
+      
       setFormData({
         full_name: "",
         email: "",
@@ -228,10 +287,27 @@ const Candidates = () => {
                 </span>
               </h3>
               <div className="flex gap-2">
-                 <ImportCandidatesDialog 
+                <ImportCandidatesDialog 
                   jobId={selectedJobId} 
-                  onImportComplete={loadCandidates} 
+                  onImportComplete={() => triggerAnalysis(false)} 
                 />
+                <Button 
+                  onClick={() => triggerAnalysis(false)} 
+                  disabled={analyzing || !selectedJobId}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-900/20"
+                >
+                  {analyzing ? (
+                    <>
+                      <span className="animate-spin mr-2">⏳</span>
+                      Analisi in corso...
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="mr-2 h-4 w-4" />
+                      Analizza CV
+                    </>
+                  )}
+                </Button>
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                   <DialogTrigger asChild>
                     <Button disabled={!selectedJobId} className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl shadow-lg shadow-gray-900/20">

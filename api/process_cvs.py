@@ -25,18 +25,11 @@ if "SERVICE_ROLE" not in (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "") and
 
 supabase: Client = create_client(url, key)
 
-# Load Configuration
-try:
-    # Get the directory of the current script
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "config.yaml")
-    
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
-        llm_config = config.get("llm", {})
-except FileNotFoundError:
-    print("Config file not found, using defaults.")
-    llm_config = {"provider": "google", "model": "gemini-1.5-flash"}
+# Load Configuration from Env
+llm_config = {
+    "provider": os.environ.get("LLM_PROVIDER", "google"),
+    "model": os.environ.get("LLM_MODEL", "gemini-1.5-flash")
+}
 
 # Initialize LLM Provider
 try:
