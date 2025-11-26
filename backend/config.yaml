@@ -1,3 +1,3 @@
 llm:
   provider: "ollama" # options: google, openai, ollama
-  model: "gpt-oss:120b-cloud" # e.g., gpt-4o, llama3, gemini-2.5-flash
+  model: "gpt-oss:120b-cloud" # e.g., gpt-4o, llama3, gemini-2.0-flash-lite

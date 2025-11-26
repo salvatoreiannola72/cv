@@ -102,7 +102,7 @@ cd cv_handler
     ```yaml
     llm:
       provider: "google" # or "ollama"
-      model: "gemini-2.5-flash"
+      model: "gemini-2.0-flash-lite"
     ```
 
 ### 4. Running the AI Processor

@@ -33,7 +33,7 @@ supabase: Client = create_client(url, key)
 # Load Configuration from Env
 llm_config = {
     "provider": os.environ.get("LLM_PROVIDER", "google"),
-    "model": os.environ.get("LLM_MODEL", "gemini-2.5-flash")
+    "model": os.environ.get("LLM_MODEL", "gemini-2.0-flash-lite")
 }
 
 # Initialize LLM Provider
