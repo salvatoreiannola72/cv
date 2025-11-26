@@ -134,6 +134,7 @@ Analyze the match.
 Also, extract the following information from the CV if available:
 - Candidate Name (Full Name)
 - Email
+- Phone Number
 - Years of Experience (as a number)
 - Education Level (e.g., Bachelor, Master, PhD, High School)
 
@@ -147,6 +148,7 @@ Output strictly in JSON format with the following structure:
     "extracted_info": {{
         "full_name": "<string or null>",
         "email": "<email or null>",
+        "phone": "<string or null>",
         "years_of_experience": <number or null>,
         "education_level": "<string or null>"
     }},
@@ -190,6 +192,7 @@ Output strictly in JSON format with the following structure:
                 update_data = {}
                 if extracted.get("full_name"): update_data["full_name"] = extracted["full_name"]
                 if extracted.get("email"): update_data["email"] = extracted["email"]
+                if extracted.get("phone"): update_data["phone"] = extracted["phone"]
                 if extracted.get("years_of_experience") is not None:
                     try:
                         update_data["years_of_experience"] = int(float(extracted["years_of_experience"]))
