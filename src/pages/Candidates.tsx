@@ -201,8 +201,13 @@ const Candidates = () => {
   useEffect(() => {
     if (selectedJobId) {
       loadCandidates();
-      // Trigger silent analysis on load/job change
-      triggerAnalysis(true);
+      
+      // Check if we need to run initial analysis
+      const hasRunInitialAnalysis = sessionStorage.getItem("initialAnalysisRun");
+      if (!hasRunInitialAnalysis) {
+        triggerAnalysis(true);
+        sessionStorage.setItem("initialAnalysisRun", "true");
+      }
     }
   }, [selectedJobId]);
 

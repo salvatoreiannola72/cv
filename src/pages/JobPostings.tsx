@@ -158,6 +158,9 @@ const JobPostings = () => {
       setEditingId(null);
       loadJobPostings();
       resetForm();
+      
+      // Reset analysis flag so it runs again when viewing candidates
+      sessionStorage.removeItem("initialAnalysisRun");
     } catch (error: any) {
       toast({
         variant: "destructive",

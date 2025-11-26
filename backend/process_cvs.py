@@ -36,7 +36,7 @@ try:
         llm_config = config.get("llm", {})
 except FileNotFoundError:
     print("Config file not found, using defaults.")
-    llm_config = {"provider": "google", "model": "gemini-2.0-flash-lite"}
+    llm_config = {"provider": "google", "model": "gemini-2.0-flash"}
 
 # Initialize LLM Provider
 try:
@@ -105,35 +105,53 @@ def process_cvs():
             print(f"  - Error downloading/reading CV: {e}")
             continue
 
-        # 3. Evaluate against EACH open job
-        for job in jobs:
-            print(f"  - Evaluating for {job['title']}...")
-            
-            # Check if score already exists
-            existing_score = supabase.from_("candidate_scores").select("id").eq("candidate_id", candidate['id']).eq("job_posting_id", job['id']).execute()
-            
-            # Check if we need to re-evaluate to extract name (if name looks like a filename)
-            name_needs_update = candidate['full_name'].lower().startswith('cv ') or candidate['full_name'].lower().endswith('.pdf') or candidate['full_name'] == "CV con foto"
+        # 3. Determine jobs to evaluate
+        # Fetch existing scores for this candidate to avoid re-work
+        existing_scores_response = supabase.from_("candidate_scores").select("job_posting_id").eq("candidate_id", candidate['id']).execute()
+        existing_job_ids = {item['job_posting_id'] for item in existing_scores_response.data}
 
-            if existing_score.data and not name_needs_update:
-                print("    - Score already exists and name seems fine, skipping.")
-                continue
+        # Check if we need to re-run to extract info (name, phone, etc.)
+        name_needs_update = candidate['full_name'].lower().startswith('cv ') or candidate['full_name'].lower().endswith('.pdf') or candidate['full_name'] == "CV con foto"
+        phone_needs_update = not candidate.get('phone')
+        
+        jobs_to_evaluate = []
+        if name_needs_update or phone_needs_update:
+            # If info is missing, evaluate against ALL open jobs to ensure we get the info and fresh scores
+            jobs_to_evaluate = jobs
+        else:
+            # Otherwise, only evaluate against new jobs
+            jobs_to_evaluate = [j for j in jobs if j['id'] not in existing_job_ids]
 
-            prompt = f"""
-You are an expert HR recruiter. Evaluate the following candidate CV against the Job Description.
+        if not jobs_to_evaluate:
+            print("  - All jobs scored and info complete, skipping.")
+            continue
 
-JOB DESCRIPTION:
+        print(f"  - Evaluating against {len(jobs_to_evaluate)} jobs...")
+
+        # 4. Construct Batch Prompt
+        jobs_section = ""
+        for job in jobs_to_evaluate:
+            jobs_section += f"""
+JOB ID: {job['id']}
 Title: {job['title']}
 Description: {job['description']}
 Requirements: {job['requirements']}
 Required Skills: {', '.join(job.get('required_skills') or [])}
+---
+"""
+
+        prompt = f"""
+You are an expert HR recruiter. Evaluate the following candidate CV against the provided Job Descriptions.
+
+JOBS TO EVALUATE:
+{jobs_section}
 
 CANDIDATE CV:
-{cv_text[:10000]} # Truncate to avoid token limits if necessary
+{cv_text[:15000]} 
 
-Analyze the match.
+Analyze the match for EACH job.
 
-Also, extract the following information from the CV if available:
+Also, extract the following information from the CV (once):
 - Candidate Name (Full Name)
 - Email
 - Phone Number
@@ -142,11 +160,6 @@ Also, extract the following information from the CV if available:
 
 Output strictly in JSON format with the following structure:
 {{
-    "overall_score": <number 0-100>,
-    "experience_score": <number 0-100>,
-    "skills_score": <number 0-100>,
-    "education_score": <number 0-100>,
-    "location_score": <number 0-100>,
     "extracted_info": {{
         "full_name": "<string or null>",
         "email": "<email or null>",
@@ -154,60 +167,77 @@ Output strictly in JSON format with the following structure:
         "years_of_experience": <number or null>,
         "education_level": "<string or null>"
     }},
-    "analysis": {{
-        "summary": "<Concise professional summary of the candidate>",
-        "green_flags": ["<flag1>", "<flag2>"],
-        "red_flags": ["<flag1>", "<flag2>"],
-        "experience_analysis": "<Concise analysis of experience match>",
-        "education_analysis": "<Concise analysis of education match>",
-        "skills_analysis": "<Concise analysis of skills match>",
-        "match_reasoning": "<Why this candidate is a good or bad fit>"
+    "evaluations": {{
+        "<job_id>": {{
+            "overall_score": <number 0-100>,
+            "experience_score": <number 0-100>,
+            "skills_score": <number 0-100>,
+            "education_score": <number 0-100>,
+            "location_score": <number 0-100>,
+            "analysis": {{
+                "summary": "<Concise professional summary>",
+                "green_flags": ["<flag1>", "<flag2>"],
+                "red_flags": ["<flag1>", "<flag2>"],
+                "experience_analysis": "<Concise analysis>",
+                "education_analysis": "<Concise analysis>",
+                "skills_analysis": "<Concise analysis>",
+                "match_reasoning": "<Why good/bad fit>"
+            }}
+        }}
     }}
 }}
 """
 
-            try:
-                result = llm_provider.generate_analysis(prompt)
-                
-                if not result:
-                    print("    - Error: Empty response from LLM")
+        try:
+            result = llm_provider.generate_analysis(prompt)
+            
+            if not result:
+                print("    - Error: Empty response from LLM")
+                continue
+
+            # 5. Process Results
+            
+            # Update candidate info
+            extracted = result.get("extracted_info", {})
+            update_data = {}
+            if extracted.get("full_name"): update_data["full_name"] = extracted["full_name"]
+            if extracted.get("email"): update_data["email"] = extracted["email"]
+            if extracted.get("phone"): update_data["phone"] = extracted["phone"]
+            if extracted.get("years_of_experience") is not None:
+                try:
+                    update_data["years_of_experience"] = int(float(extracted["years_of_experience"]))
+                except (ValueError, TypeError):
+                    pass 
+            if extracted.get("education_level"): update_data["education_level"] = extracted["education_level"]
+            
+            if update_data:
+                supabase.from_("candidates").update(update_data).eq("id", candidate['id']).execute()
+                print(f"    - Candidate info updated: {update_data.keys()}")
+
+            # Insert Scores
+            evaluations = result.get("evaluations", {})
+            for job_id, eval_data in evaluations.items():
+                # Verify job_id exists in our list (sanity check)
+                if not any(j['id'] == job_id for j in jobs_to_evaluate):
+                    print(f"    - Warning: LLM returned evaluation for unknown/unrequested job {job_id}, skipping.")
                     continue
 
-                # Prepare data for candidate_scores
                 score_data = {
                     "candidate_id": candidate['id'],
-                    "job_posting_id": job['id'],
-                    "overall_score": result.get("overall_score", 0),
-                    "experience_score": result.get("experience_score", 0),
-                    "skills_score": result.get("skills_score", 0),
-                    "education_score": result.get("education_score", 0),
-                    "location_score": result.get("location_score", 0),
-                    "score_details": result.get("analysis", {}) # Store the detailed analysis here
+                    "job_posting_id": job_id,
+                    "overall_score": eval_data.get("overall_score", 0),
+                    "experience_score": eval_data.get("experience_score", 0),
+                    "skills_score": eval_data.get("skills_score", 0),
+                    "education_score": eval_data.get("education_score", 0),
+                    "location_score": eval_data.get("location_score", 0),
+                    "score_details": eval_data.get("analysis", {})
                 }
-
-                # Upsert score
-                supabase.from_("candidate_scores").upsert(score_data, on_conflict="candidate_id, job_posting_id").execute()
-                print(f"    - Score saved: {score_data['overall_score']}")
-
-                # Update candidate extracted info (only if found)
-                extracted = result.get("extracted_info", {})
-                update_data = {}
-                if extracted.get("full_name"): update_data["full_name"] = extracted["full_name"]
-                if extracted.get("email"): update_data["email"] = extracted["email"]
-                if extracted.get("phone"): update_data["phone"] = extracted["phone"]
-                if extracted.get("years_of_experience") is not None:
-                    try:
-                        update_data["years_of_experience"] = int(float(extracted["years_of_experience"]))
-                    except (ValueError, TypeError):
-                        pass # Keep original or ignore if invalid
-                if extracted.get("education_level"): update_data["education_level"] = extracted["education_level"]
                 
-                if update_data:
-                    supabase.from_("candidates").update(update_data).eq("id", candidate['id']).execute()
-                    print(f"    - Candidate info updated: {update_data.keys()}")
+                supabase.from_("candidate_scores").upsert(score_data, on_conflict="candidate_id, job_posting_id").execute()
+                print(f"    - Score saved for job {job_id}: {score_data['overall_score']}")
 
-            except Exception as e:
-                print(f"    - Error evaluating: {e}")
+        except Exception as e:
+            print(f"    - Error evaluating: {e}")
 
 if __name__ == "__main__":
     process_cvs()

@@ -77,7 +77,7 @@ class LLMFactory:
     @staticmethod
     def create_provider(config: dict) -> LLMProvider:
         provider_type = config.get("provider", "google").lower()
-        model_name = config.get("model", "gemini-2.0-flash-lite")
+        model_name = config.get("model", "gemini-2.0-flash")
 
         if provider_type == "google":
             api_key = os.environ.get("GOOGLE_API_KEY")
