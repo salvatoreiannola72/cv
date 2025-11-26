@@ -9,7 +9,18 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, ArrowLeft, Users, Mail, Phone, MapPin, Briefcase, FileText } from "lucide-react";
+import { Upload, ArrowLeft, Users, Mail, Phone, MapPin, Briefcase, FileText, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { z } from "zod";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { ImportCandidatesDialog } from "@/components/candidates/ImportCandidatesDialog";
@@ -262,6 +273,49 @@ const Candidates = () => {
   };
 
 
+
+  const handleDeleteCandidate = async (candidateId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    try {
+      // Delete scores first
+      const { error: scoresError } = await supabase
+        .from("candidate_scores")
+        .delete()
+        .eq("candidate_id", candidateId);
+
+      if (scoresError) console.error("Error deleting scores:", scoresError);
+
+      // Delete status history
+      const { error: historyError } = await supabase
+        .from("candidate_status_history")
+        .delete()
+        .eq("candidate_id", candidateId);
+
+      if (historyError) console.error("Error deleting history:", historyError);
+
+      // Delete candidate
+      const { error } = await supabase
+        .from("candidates")
+        .delete()
+        .eq("id", candidateId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Candidato eliminato",
+        description: "Il candidato è stato rimosso con successo",
+      });
+
+      setCandidates(candidates.filter(c => c.id !== candidateId));
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Errore",
+        description: "Impossibile eliminare il candidato",
+      });
+    }
+  };
 
   const getScoreBadge = (score: number | null) => {
     if (!score) return <Badge variant="outline" className="border-gray-200 text-gray-500">N/A</Badge>;
@@ -526,6 +580,35 @@ const Candidates = () => {
                         <div className="flex flex-col gap-2 items-end min-w-[100px]">
                           {getScoreBadge(candidate.overall_score)}
                         </div>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-gray-400 hover:text-red-600 hover:bg-red-50"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Sei sicuro?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Questa azione non può essere annullata. Il candidato verrà rimosso permanentemente dal database e da tutte le comparazioni.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Annulla</AlertDialogCancel>
+                              <AlertDialogAction
+                                className="bg-red-600 hover:bg-red-700"
+                                onClick={(e) => handleDeleteCandidate(candidate.id, e)}
+                              >
+                                Elimina
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </div>
                     </div>
                   ))}

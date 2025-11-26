@@ -6,7 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, Mail, Phone, MapPin, Briefcase, GraduationCap, FileText, Download, ExternalLink, CheckCircle, ThumbsUp, ThumbsDown, AlertTriangle, Check } from "lucide-react";
+import { ArrowLeft, Mail, Phone, MapPin, Briefcase, GraduationCap, FileText, Download, ExternalLink, CheckCircle, ThumbsUp, ThumbsDown, AlertTriangle, Check, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
 interface CandidateDetail {
@@ -145,6 +156,49 @@ const CandidateDetail = () => {
     }
   };
 
+  const handleDeleteCandidate = async () => {
+    if (!candidate) return;
+
+    try {
+      // Delete scores first
+      const { error: scoresError } = await supabase
+        .from("candidate_scores")
+        .delete()
+        .eq("candidate_id", candidate.id);
+
+      if (scoresError) console.error("Error deleting scores:", scoresError);
+
+      // Delete status history
+      const { error: historyError } = await supabase
+        .from("candidate_status_history")
+        .delete()
+        .eq("candidate_id", candidate.id);
+
+      if (historyError) console.error("Error deleting history:", historyError);
+
+      // Delete candidate
+      const { error } = await supabase
+        .from("candidates")
+        .delete()
+        .eq("id", candidate.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Candidato eliminato",
+        description: "Il candidato è stato rimosso con successo",
+      });
+
+      navigate("/candidates");
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Errore",
+        description: "Impossibile eliminare il candidato",
+      });
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const config: Record<string, { label: string; className: string }> = {
       new: { label: "Nuovo", className: "bg-blue-100 text-blue-700" },
@@ -200,17 +254,43 @@ const CandidateDetail = () => {
             
             <Card className="border-none shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] rounded-[20px] h-full flex-1">
               <div className="p-6 space-y-4">
-                <div>
-                  <h1 className="text-3xl font-bold text-gray-900 tracking-tight mb-2">{candidate.full_name}</h1>
-                  <div className="flex items-center gap-2 text-gray-500 text-base">
-                    <Briefcase className="h-4 w-4" />
-                    <span className="font-medium">
-                      {selectedScore ? selectedScore.job_posting?.title : "Nessuna valutazione"}
-                    </span>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h1 className="text-3xl font-bold text-gray-900 tracking-tight mb-2">{candidate.full_name}</h1>
+                    <div className="flex items-center gap-2 text-gray-500 text-base">
+                      <Briefcase className="h-4 w-4" />
+                      <span className="font-medium">
+                        {selectedScore ? selectedScore.job_posting?.title : "Nessuna valutazione"}
+                      </span>
+                    </div>
+                    <div className="mt-3">
+                      {getStatusBadge(candidate.current_status)}
+                    </div>
                   </div>
-                  <div className="mt-3">
-                    {getStatusBadge(candidate.current_status)}
-                  </div>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="icon" className="text-gray-400 hover:text-red-600 hover:bg-red-50 -mr-2 -mt-2">
+                        <Trash2 className="h-5 w-5" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Sei sicuro?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Questa azione non può essere annullata. Il candidato verrà rimosso permanentemente dal database e da tutte le comparazioni.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Annulla</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-red-600 hover:bg-red-700"
+                          onClick={handleDeleteCandidate}
+                        >
+                          Elimina
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
 
                 {signedCvUrl && (

@@ -30,3 +30,5 @@ backend/venv
 
 # Local Data
 supabase_db/
+
+.env
