@@ -42,8 +42,12 @@ const Dashboard = () => {
           .from("candidates")
           .select("*", { count: "exact", head: true }),
         supabase
-          .from("candidates")
-          .select("*, job_postings(title)")
+          .from("candidate_scores")
+          .select(`
+            overall_score,
+            candidate:candidates(id, full_name),
+            job:job_postings(title)
+          `)
           .order("overall_score", { ascending: false })
           .limit(10)
       ]);
@@ -115,7 +119,7 @@ const Dashboard = () => {
               {openJobs.map((job) => (
                 <div
                   key={job.id}
-                  onClick={() => navigate(`/job-postings`)}
+                  onClick={() => navigate(`/candidates?job=${job.id}`)}
                   className="group cursor-pointer bg-white rounded-xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200"
                 >
                   <div className="flex justify-between items-start">
@@ -149,31 +153,31 @@ const Dashboard = () => {
             </div>
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="divide-y divide-gray-100">
-                {topCandidates.map((candidate) => (
+                {topCandidates.map((item: any, index: number) => (
                   <div
-                    key={candidate.id}
-                    onClick={() => navigate(`/candidate/${candidate.id}`)}
+                    key={index}
+                    onClick={() => navigate(`/candidate/${item.candidate.id}`)}
                     className="p-4 hover:bg-gray-50 cursor-pointer transition-colors flex items-center justify-between"
                   >
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-semibold">
-                        {candidate.full_name.charAt(0)}
+                        {item.candidate.full_name?.charAt(0) || "?"}
                       </div>
                       <div>
-                        <h4 className="font-medium text-gray-900">{candidate.full_name}</h4>
+                        <h4 className="font-medium text-gray-900">{item.candidate.full_name}</h4>
                         <p className="text-xs text-gray-500">
-                          {candidate.job_postings?.title || "Candidatura spontanea"}
+                          {item.job?.title || "Posizione sconosciuta"}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
-                      {candidate.overall_score && (
+                      {item.overall_score !== null && (
                         <div className="flex items-center gap-1">
                           <span className={`text-sm font-bold ${
-                            candidate.overall_score >= 80 ? "text-green-600" :
-                            candidate.overall_score >= 60 ? "text-yellow-600" : "text-gray-600"
+                            item.overall_score >= 80 ? "text-green-600" :
+                            item.overall_score >= 60 ? "text-yellow-600" : "text-gray-600"
                           }`}>
-                            {candidate.overall_score}%
+                            {item.overall_score}%
                           </span>
                         </div>
                       )}
