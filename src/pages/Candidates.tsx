@@ -1,0 +1,466 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import { Upload, ArrowLeft, Users, Mail, Phone, MapPin, Briefcase, FileText } from "lucide-react";
+import { z } from "zod";
+import DashboardLayout from "@/components/layout/DashboardLayout";
+import { ImportCandidatesDialog } from "@/components/candidates/ImportCandidatesDialog";
+
+const candidateSchema = z.object({
+  full_name: z.string().min(2, "Nome troppo corto").max(100),
+  email: z.string().email("Email non valida"),
+  phone: z.string().optional(),
+  location: z.string().optional(),
+});
+
+interface Candidate {
+  id: string;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  location: string | null;
+  current_status: string;
+  overall_score: number | null;
+  years_of_experience: number | null;
+  created_at: string;
+}
+
+interface JobPosting {
+  id: string;
+  title: string;
+  description: string;
+  requirements: string;
+  location: string;
+  required_skills: string[];
+  created_at: string;
+}
+
+const Candidates = () => {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const [searchParams] = useSearchParams();
+  const jobId = searchParams.get("job");
+
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [jobPostings, setJobPostings] = useState<JobPosting[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string>(jobId || "");
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  
+  const [formData, setFormData] = useState({
+    full_name: "",
+    email: "",
+    phone: "",
+    location: "",
+    cv_file: null as File | null,
+  });
+
+  // Derived state for the selected job object
+  const selectedJob = jobPostings.find(j => j.id === selectedJobId);
+
+  useEffect(() => {
+    checkAuth();
+    loadJobPostings();
+  }, []);
+
+  useEffect(() => {
+    if (selectedJobId) {
+      loadCandidates();
+    }
+  }, [selectedJobId]);
+
+  const checkAuth = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      navigate("/auth");
+    }
+  };
+
+  const loadJobPostings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("job_postings")
+        .select("*") // Fetch all fields to show details
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setJobPostings(data || []);
+      
+      if (data && data.length > 0 && !selectedJobId) {
+        setSelectedJobId(data[0].id);
+      }
+    } catch (error) {
+      console.error("Errore caricamento posizioni:", error);
+    }
+  };
+
+  const loadCandidates = async () => {
+    if (!selectedJobId) return;
+    
+    setLoading(true);
+    try {
+      // Fetch scores for this job, joining with candidates
+      const { data, error } = await supabase
+        .from("candidate_scores")
+        .select(`
+          overall_score,
+          candidate:candidates!inner(*)
+        `)
+        .eq("job_posting_id", selectedJobId)
+        .order("overall_score", { ascending: false });
+
+      if (error) throw error;
+
+      // Transform data to match Candidate interface
+      const formattedCandidates: Candidate[] = (data || []).map((item: any) => ({
+        ...item.candidate,
+        overall_score: item.overall_score,
+      }));
+
+      setCandidates(formattedCandidates);
+    } catch (error) {
+      console.error("Errore caricamento candidati:", error);
+      toast({
+        variant: "destructive",
+        title: "Errore",
+        description: "Impossibile caricare i candidati",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUploadCandidate = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    try {
+      candidateSchema.parse(formData);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Utente non autenticato");
+
+      let cvUrl = null;
+      if (formData.cv_file) {
+        const fileExt = formData.cv_file.name.split(".").pop();
+        const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from("cv-files")
+          .upload(fileName, formData.cv_file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from("cv-files")
+          .getPublicUrl(fileName);
+
+        cvUrl = publicUrl;
+      }
+
+      const { error } = await supabase.from("candidates").insert([
+        {
+          job_posting_id: selectedJobId, // Optional: link to job if needed, or null
+          full_name: formData.full_name,
+          email: formData.email,
+          phone: formData.phone || null,
+          location: formData.location || null,
+          cv_file_url: cvUrl,
+          added_by: user.id,
+        },
+      ]);
+
+      if (error) throw error;
+
+      toast({
+        title: "Candidato aggiunto",
+        description: "Il candidato è stato inserito con successo",
+      });
+
+      setDialogOpen(false);
+      loadCandidates();
+      setFormData({
+        full_name: "",
+        email: "",
+        phone: "",
+        location: "",
+        cv_file: null,
+      });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Errore",
+        description: error.message || "Errore nell'inserimento del candidato",
+      });
+    }
+  };
+
+
+
+  const getScoreBadge = (score: number | null) => {
+    if (!score) return <Badge variant="outline" className="border-gray-200 text-gray-500">N/A</Badge>;
+    
+    if (score >= 80) {
+      return <Badge className="bg-green-50 text-green-700 border border-green-200 shadow-none">{score.toFixed(1)}</Badge>;
+    } else if (score >= 60) {
+      return <Badge className="bg-yellow-50 text-yellow-700 border border-yellow-200 shadow-none">{score.toFixed(1)}</Badge>;
+    } else {
+      return <Badge className="bg-gray-50 text-gray-600 border border-gray-200 shadow-none">{score.toFixed(1)}</Badge>;
+    }
+  };
+
+  return (
+    <DashboardLayout>
+      <div className="p-8 max-w-7xl mx-auto space-y-8">
+        <div className="flex justify-between items-center bg-white p-4 rounded-[20px] shadow-sm border border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Users className="h-5 w-5 text-gray-500" />
+                Candidati
+                <span className="ml-2 text-sm font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                  {candidates.length}
+                </span>
+              </h3>
+              <div className="flex gap-2">
+                 <ImportCandidatesDialog 
+                  jobId={selectedJobId} 
+                  onImportComplete={loadCandidates} 
+                />
+                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button disabled={!selectedJobId} className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl shadow-lg shadow-gray-900/20">
+                      <Upload className="mr-2 h-4 w-4" />
+                      Aggiungi
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-md rounded-[20px]">
+                    <DialogHeader>
+                      <DialogTitle className="text-xl font-bold">Aggiungi Candidato</DialogTitle>
+                      <DialogDescription>
+                        Inserisci i dati del candidato e carica il CV
+                      </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleUploadCandidate} className="space-y-4 mt-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="full_name">Nome Completo *</Label>
+                        <Input
+                          id="full_name"
+                          value={formData.full_name}
+                          onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                          placeholder="Mario Rossi"
+                          required
+                          className="rounded-xl"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="email">Email *</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={formData.email}
+                          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                          placeholder="mario.rossi@email.com"
+                          required
+                          className="rounded-xl"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="phone">Telefono</Label>
+                        <Input
+                          id="phone"
+                          type="tel"
+                          value={formData.phone}
+                          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                          placeholder="+39 333 1234567"
+                          className="rounded-xl"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="location">Località</Label>
+                        <Input
+                          id="location"
+                          value={formData.location}
+                          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                          placeholder="Milano, Italia"
+                          className="rounded-xl"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="cv_file">CV (PDF)</Label>
+                        <Input
+                          id="cv_file"
+                          type="file"
+                          accept=".pdf"
+                          onChange={(e) => setFormData({ ...formData, cv_file: e.target.files?.[0] || null })}
+                          className="rounded-xl file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 file:mr-4 hover:file:bg-gray-200"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Carica il curriculum in formato PDF
+                        </p>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-4">
+                        <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl">
+                          Annulla
+                        </Button>
+                        <Button type="submit" className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl">Aggiungi</Button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left Column: Job Selection & Details (4 cols) */}
+          <div className="lg:col-span-4 space-y-6">
+            
+            {/* Job Selection List */}
+            <div className="space-y-4 ">
+              <h3 className="text-lg font-semibold text-gray-900 ml-2">Posizioni Aperte</h3>
+              <div className="space-y-3 max-h-[400px] overflow-y-auto p-2 custom-scrollbar">
+                {jobPostings.map((job) => (
+                  <Card 
+                    key={job.id} 
+                    className={`cursor-pointer transition-all duration-200 border-none shadow-sm hover:shadow-md ${
+                      selectedJobId === job.id ? "ring-2 ring-gray-900 bg-gray-900 text-white" : "bg-white hover:bg-gray-50"
+                    }`}
+                    onClick={() => setSelectedJobId(job.id)}
+                  >
+                    <CardContent className="p-4">
+                      <h3 className={`font-semibold text-sm mb-1 ${selectedJobId === job.id ? "text-white" : "text-gray-900"}`}>
+                        {job.title}
+                      </h3>
+                      <div className={`flex items-center gap-2 text-xs ${selectedJobId === job.id ? "text-gray-300" : "text-gray-500"}`}>
+                        <MapPin className="h-3 w-3" />
+                        {job.location}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* Selected Job Details */}
+            {selectedJob && (
+              <Card className="border-none shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] rounded-[20px] bg-white sticky top-4">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg font-bold flex items-center gap-2">
+                    <Briefcase className="h-5 w-5 text-gray-500" />
+                    Dettagli
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-2">Descrizione</h4>
+                    <p className="text-sm text-gray-600 leading-relaxed">{selectedJob.description}</p>
+                  </div>
+                  
+                  <div className="border-t pt-4">
+                    <h4 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-2">Requisiti</h4>
+                    <p className="text-sm text-gray-600 leading-relaxed">{selectedJob.requirements}</p>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <h4 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-2">Competenze</h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedJob.required_skills?.map((skill: string, idx: number) => (
+                        <Badge key={idx} variant="secondary" className="text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 border-none">
+                          {skill}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Right Column: Candidates List (8 cols) */}
+          <div className="lg:col-span-8 space-y-6">
+            <div className="bg-white p-6 rounded-[20px] shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] min-h-[500px]">
+              {loading ? (
+                <div className="text-center py-12">
+                  <p className="text-muted-foreground">Caricamento...</p>
+                </div>
+              ) : !selectedJobId ? (
+                <div className="text-center py-12">
+                  <Briefcase className="mx-auto h-12 w-12 text-gray-300 mb-4" />
+                  <h3 className="text-lg font-semibold mb-2 text-gray-900">Nessuna posizione selezionata</h3>
+                  <p className="text-gray-500">
+                    Seleziona una posizione per visualizzare i candidati
+                  </p>
+                </div>
+              ) : candidates.length === 0 ? (
+                <div className="text-center py-12">
+                  <Users className="mx-auto h-12 w-12 text-gray-300 mb-4" />
+                  <h3 className="text-lg font-semibold mb-2 text-gray-900">Nessun candidato</h3>
+                  <p className="text-gray-500 mb-4">
+                    Aggiungi il primo candidato per questa posizione
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {candidates.map((candidate) => (
+                    <div
+                      key={candidate.id}
+                      className="group flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:border-gray-200 hover:shadow-md transition-all duration-200 cursor-pointer bg-white"
+                      onClick={() => navigate(`/candidate/${candidate.id}`, { state: { jobId: selectedJobId } })}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 font-semibold text-lg">
+                          {candidate.full_name.charAt(0)}
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-gray-900 group-hover:text-primary transition-colors">{candidate.full_name}</h4>
+                          <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
+                            <span className="flex items-center gap-1">
+                              <Mail className="h-3 w-3" />
+                              {candidate.email}
+                            </span>
+                            {candidate.location && (
+                              <span className="flex items-center gap-1">
+                                <MapPin className="h-3 w-3" />
+                                {candidate.location}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-4">
+                        <div className="text-right hidden md:block">
+                          <div className="text-sm font-medium text-gray-900">
+                            {candidate.years_of_experience !== null ? `${candidate.years_of_experience} anni exp` : "Exp N/A"}
+                          </div>
+                          <div className="text-xs text-gray-400">
+                            {new Date(candidate.created_at).toLocaleDateString("it-IT")}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2 items-end min-w-[100px]">
+                          {getScoreBadge(candidate.overall_score)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+};
+
+export default Candidates;
