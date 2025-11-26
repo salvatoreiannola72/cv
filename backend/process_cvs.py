@@ -83,28 +83,6 @@ def process_cvs():
     for candidate in candidates:
         print(f"\nProcessing candidate: {candidate['full_name']} (ID: {candidate['id']})")
         
-        # Download CV
-        if not candidate.get("cv_file_url"):
-            print("  - No CV URL found, skipping.")
-            continue
-
-        try:
-            # Extract path from URL (assuming standard Supabase storage URL structure)
-            # URL format: .../storage/v1/object/public/cv-files/user_id/filename.pdf
-            cv_path = candidate["cv_file_url"].split("/cv-files/")[-1]
-            
-            print(f"  - Downloading CV: {cv_path}")
-            cv_data = supabase.storage.from_("cv-files").download(cv_path)
-            
-            cv_text = extract_text_from_pdf(cv_data)
-            if not cv_text:
-                print("  - Could not extract text from CV, skipping.")
-                continue
-                
-        except Exception as e:
-            print(f"  - Error downloading/reading CV: {e}")
-            continue
-
         # 3. Determine jobs to evaluate
         # Fetch existing scores for this candidate to avoid re-work
         existing_scores_response = supabase.from_("candidate_scores").select("job_posting_id").eq("candidate_id", candidate['id']).execute()
@@ -124,6 +102,28 @@ def process_cvs():
 
         if not jobs_to_evaluate:
             print("  - All jobs scored and info complete, skipping.")
+            continue
+
+        # 4. Download CV (only if needed)
+        if not candidate.get("cv_file_url"):
+            print("  - No CV URL found, skipping.")
+            continue
+
+        try:
+            # Extract path from URL (assuming standard Supabase storage URL structure)
+            # URL format: .../storage/v1/object/public/cv-files/user_id/filename.pdf
+            cv_path = candidate["cv_file_url"].split("/cv-files/")[-1]
+            
+            print(f"  - Downloading CV: {cv_path}")
+            cv_data = supabase.storage.from_("cv-files").download(cv_path)
+            
+            cv_text = extract_text_from_pdf(cv_data)
+            if not cv_text:
+                print("  - Could not extract text from CV, skipping.")
+                continue
+                
+        except Exception as e:
+            print(f"  - Error downloading/reading CV: {e}")
             continue
 
         print(f"  - Evaluating against {len(jobs_to_evaluate)} jobs...")
