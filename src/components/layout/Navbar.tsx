@@ -22,7 +22,7 @@ const Navbar = () => {
         <div className="flex justify-between h-16">
           <div className="flex">
             <div className="flex-shrink-0 flex items-center cursor-pointer" onClick={() => navigate("/dashboard")}>
-              <img src="/logo_hiresight.png" alt="Hiresight Logo" className="h-28 w-auto" />
+              <img src="/logo_skillmatch.jpg" alt="SkillMatch Logo" className="h-16 w-auto" />
             </div>
             <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
               <Link
