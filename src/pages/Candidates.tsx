@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, ArrowLeft, Users, Mail, Phone, MapPin, Briefcase, FileText, Trash2 } from "lucide-react";
+import { Upload, ArrowLeft, Users, Mail, Phone, MapPin, Briefcase, FileText, Trash2, Search } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,6 +65,8 @@ const Candidates = () => {
   const [selectedJobId, setSelectedJobId] = useState<string>(jobId || "");
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   
   const [formData, setFormData] = useState({
     full_name: "",
@@ -81,6 +83,15 @@ const Candidates = () => {
     checkAuth();
     loadJobPostings();
   }, []);
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const [analyzing, setAnalyzing] = useState(false);
 
@@ -109,13 +120,13 @@ const Candidates = () => {
     }
   };
 
-  const loadCandidates = async () => {
+  const loadCandidates = useCallback(async () => {
     if (!selectedJobId) return;
     
     setLoading(true);
     try {
-      // Fetch scores for this job, joining with candidates
-      const { data, error } = await supabase
+      // Build the query
+      let query: any = supabase
         .from("candidate_scores")
         .select(`
           overall_score,
@@ -123,6 +134,16 @@ const Candidates = () => {
         `)
         .eq("job_posting_id", selectedJobId)
         .order("overall_score", { ascending: false });
+
+      // Apply search filter if query exists
+      if (debouncedSearchQuery) {
+        // We use !inner join to filter by candidate fields
+        // The syntax for OR across columns in a joined table:
+        // We reference the alias 'candidate' and the columns
+        query = query.or(`full_name.ilike.%${debouncedSearchQuery}%,cv_text_content.ilike.%${debouncedSearchQuery}%`, { foreignTable: "candidate" });
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -143,7 +164,7 @@ const Candidates = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedJobId, debouncedSearchQuery, toast]);
 
   const triggerAnalysis = async (silent: boolean = false) => {
     if (!selectedJobId) return;
@@ -195,22 +216,18 @@ const Candidates = () => {
   };
 
   useEffect(() => {
-    checkAuth();
-    loadJobPostings();
-  }, []);
-
-  useEffect(() => {
     if (selectedJobId) {
       loadCandidates();
       
       // Check if we need to run initial analysis
-      const hasRunInitialAnalysis = sessionStorage.getItem("initialAnalysisRun");
+      // We use a key specific to the job to avoid running it multiple times for the same job in the session
+      const hasRunInitialAnalysis = sessionStorage.getItem(`initialAnalysisRun_${selectedJobId}`);
       if (!hasRunInitialAnalysis) {
         triggerAnalysis(true);
-        sessionStorage.setItem("initialAnalysisRun", "true");
+        sessionStorage.setItem(`initialAnalysisRun_${selectedJobId}`, "true");
       }
     }
-  }, [selectedJobId]);
+  }, [selectedJobId, loadCandidates]); 
 
   const handleUploadCandidate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -290,7 +307,6 @@ const Candidates = () => {
   };
 
 
-
   const handleDeleteCandidate = async (candidateId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
@@ -349,15 +365,29 @@ const Candidates = () => {
   return (
     <DashboardLayout>
       <div className="p-8 max-w-7xl mx-auto space-y-8">
-        <div className="flex justify-between items-center bg-white p-4 rounded-[20px] shadow-sm border border-gray-100">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <Users className="h-5 w-5 text-gray-500" />
-                Candidati
-                <span className="ml-2 text-sm font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                  {candidates.length}
-                </span>
-              </h3>
-              <div className="flex gap-2">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 gap-4">
+              <div className="flex items-center gap-6 flex-1 w-full md:w-auto">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 whitespace-nowrap">
+                  <Users className="h-5 w-5 text-gray-500" />
+                  Candidati
+                  <span className="ml-2 text-sm font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                    {candidates.length}
+                  </span>
+                </h3>
+                
+                {/* Search Bar */}
+                <div className="relative w-full max-w-md">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input 
+                    placeholder="Cerca per nome o contenuto CV..." 
+                    className="pl-10 h-10 rounded-xl bg-gray-50 border-gray-200 focus:bg-white transition-all w-full"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 w-full md:w-auto justify-end">
                 <ImportCandidatesDialog 
                   jobId={selectedJobId} 
                   onImportComplete={() => triggerAnalysis(false)} 
@@ -551,10 +581,15 @@ const Candidates = () => {
               ) : candidates.length === 0 ? (
                 <div className="text-center py-12">
                   <Users className="mx-auto h-12 w-12 text-gray-300 mb-4" />
-                  <h3 className="text-lg font-semibold mb-2 text-gray-900">Nessun candidato</h3>
+                  <h3 className="text-lg font-semibold mb-2 text-gray-900">Nessun candidato trovato</h3>
                   <p className="text-gray-500 mb-4">
-                    Aggiungi il primo candidato per questa posizione
+                    {debouncedSearchQuery ? "Prova a modificare i filtri di ricerca" : "Aggiungi il primo candidato per questa posizione"}
                   </p>
+                  {debouncedSearchQuery && (
+                    <Button variant="outline" onClick={() => setSearchQuery("")}>
+                      Reset ricerca
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <div className="grid gap-4">
