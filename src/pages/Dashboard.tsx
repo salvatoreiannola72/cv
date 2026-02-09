@@ -1,67 +1,56 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { apiClient, JobPosting, TopCandidate } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Briefcase, Users, FileText, TrendingUp, ArrowRight } from "lucide-react";
+import { Briefcase, Users, ArrowRight } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { isAuthenticated } = useAuth();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     openPositions: 0,
     totalCandidates: 0,
   });
-  const [openJobs, setOpenJobs] = useState<any[]>([]);
-  const [topCandidates, setTopCandidates] = useState<any[]>([]);
+  const [openJobs, setOpenJobs] = useState<JobPosting[]>([]);
+  const [topCandidates, setTopCandidates] = useState<TopCandidate[]>([]);
 
   useEffect(() => {
-    checkAuth();
-    loadDashboardData();
-  }, []);
-
-  const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      navigate("/auth");
+    if (isAuthenticated) {
+      loadDashboardData();
     }
-  };
+  }, [isAuthenticated]);
 
   const loadDashboardData = async () => {
     try {
-      // Fetch stats and lists in parallel
-      const [jobsResponse, candidatesResponse, topCandidatesResponse] = await Promise.all([
-        supabase
-          .from("job_postings")
-          .select("*")
-          .eq("status", "open")
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("candidates")
-          .select("*", { count: "exact", head: true }),
-        supabase
-          .from("candidate_scores")
-          .select(`
-            overall_score,
-            candidate:candidates(id, full_name),
-            job:job_postings(title)
-          `)
-          .order("overall_score", { ascending: false })
-          .limit(10)
+      setLoading(true);
+
+      // Fetch all data from single endpoint
+      const [jobs, dashboardStats] = await Promise.all([
+        apiClient.getJobs(),
+        apiClient.getDashboardStats(),
       ]);
 
+      setOpenJobs(jobs || []);
       setStats({
-        openPositions: jobsResponse.data?.length || 0,
-        totalCandidates: candidatesResponse.count || 0,
+        openPositions: dashboardStats.open_positions,
+        totalCandidates: dashboardStats.total_candidates,
       });
-
-      setOpenJobs(jobsResponse.data || []);
-      setTopCandidates(topCandidatesResponse.data || []);
+      setTopCandidates(dashboardStats.top_candidates || []);
 
     } catch (error) {
       console.error("Errore caricamento dashboard:", error);
+      toast({
+        variant: "destructive",
+        title: "Errore",
+        description: "Impossibile caricare i dati della dashboard",
+      });
     } finally {
       setLoading(false);
     }
@@ -116,29 +105,34 @@ const Dashboard = () => {
               </Button>
             </div>
             <div className="grid gap-4">
-              {openJobs.map((job) => (
-                <div
-                  key={job.id}
-                  onClick={() => navigate(`/candidates?job=${job.id}`)}
-                  className="group cursor-pointer bg-white rounded-xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200"
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h4 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                        {job.title}
-                      </h4>
-                      <p className="text-sm text-gray-500 mt-1">{job.location} • {job.employment_type}</p>
-                    </div>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      Active
-                    </span>
-                  </div>
+              {loading ? (
+                <div className="text-center py-8 text-gray-500 bg-white rounded-xl border border-dashed border-gray-200">
+                  Caricamento...
                 </div>
-              ))}
-              {openJobs.length === 0 && (
+              ) : openJobs.length === 0 ? (
                 <div className="text-center py-8 text-gray-500 bg-white rounded-xl border border-dashed border-gray-200">
                   Nessuna posizione aperta
                 </div>
+              ) : (
+                openJobs.map((job) => (
+                  <div
+                    key={job.id}
+                    onClick={() => navigate(`/candidates?job=${job.id}`)}
+                    className="group cursor-pointer bg-white rounded-xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                          {job.title}
+                        </h4>
+                        <p className="text-sm text-gray-500 mt-1">{job.location} • {job.employment_type}</p>
+                      </div>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        Active
+                      </span>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </div>
@@ -153,42 +147,46 @@ const Dashboard = () => {
             </div>
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="divide-y divide-gray-100">
-                {topCandidates.map((item: any, index: number) => (
-                  <div
-                    key={index}
-                    onClick={() => navigate(`/candidate/${item.candidate.id}`)}
-                    className="p-4 hover:bg-gray-50 cursor-pointer transition-colors flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-semibold">
-                        {item.candidate.full_name?.charAt(0) || "?"}
-                      </div>
-                      <div>
-                        <h4 className="font-medium text-gray-900">{item.candidate.full_name}</h4>
-                        <p className="text-xs text-gray-500">
-                          {item.job?.title || "Posizione sconosciuta"}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      {item.overall_score !== null && (
-                        <div className="flex items-center gap-1">
-                          <span className={`text-sm font-bold ${
-                            item.overall_score >= 80 ? "text-green-600" :
-                            item.overall_score >= 60 ? "text-yellow-600" : "text-gray-600"
-                          }`}>
-                            {item.overall_score}%
-                          </span>
-                        </div>
-                      )}
-                      <ArrowRight className="h-4 w-4 text-gray-300" />
-                    </div>
+                {loading ? (
+                  <div className="text-center py-8 text-gray-500">
+                    Caricamento...
                   </div>
-                ))}
-                {topCandidates.length === 0 && (
+                ) : topCandidates.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     Nessun candidato trovato
                   </div>
+                ) : (
+                  topCandidates.map((item, index) => (
+                    <div
+                      key={index}
+                      onClick={() => navigate(`/candidate/${item.candidate.id}`)}
+                      className="p-4 hover:bg-gray-50 cursor-pointer transition-colors flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-semibold">
+                          {item.candidate.full_name?.charAt(0) || "?"}
+                        </div>
+                        <div>
+                          <h4 className="font-medium text-gray-900">{item.candidate.full_name}</h4>
+                          <p className="text-xs text-gray-500">
+                            {item.job_posting?.title || "Posizione sconosciuta"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        {item.overall_score !== null && (
+                          <div className="flex items-center gap-1">
+                            <span className={`text-sm font-bold ${item.overall_score >= 80 ? "text-green-600" :
+                                item.overall_score >= 60 ? "text-yellow-600" : "text-gray-600"
+                              }`}>
+                              {item.overall_score.toFixed(0)}%
+                            </span>
+                          </div>
+                        )}
+                        <ArrowRight className="h-4 w-4 text-gray-300" />
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </div>

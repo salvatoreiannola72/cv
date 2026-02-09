@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Upload, FolderOpen, FileText, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 
@@ -54,49 +54,31 @@ export function ImportCandidatesDialog({ jobId, onImportComplete }: ImportCandid
     let errorCount = 0;
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Utente non autenticato");
-
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         setCurrentFileIndex(i);
         
         try {
-          // 1. Upload file to Storage
-          const fileExt = file.name.split(".").pop();
-          const fileName = `${user.id}/${Date.now()}_${i}.${fileExt}`;
-          
-          const { error: uploadError } = await supabase.storage
-            .from("cv-files")
-            .upload(fileName, file);
-
-          if (uploadError) throw uploadError;
-
-          const { data: { publicUrl } } = supabase.storage
-            .from("cv-files")
-            .getPublicUrl(fileName);
-
-          // 2. Create Candidate record
           // Extract name from filename (remove extension and underscores)
           const candidateName = file.name
             .replace(/\.[^/.]+$/, "")
             .replace(/[_-]/g, " ");
 
-          const { error: dbError } = await supabase.from("candidates").insert([
-            {
-              job_posting_id: jobId || null, // Allow null for general import
-              full_name: candidateName, // Temporary name from filename
-              email: "da_verificare@example.com", // Placeholder
-              cv_file_url: publicUrl,
-              added_by: user.id,
-              current_status: "new",
-            },
-          ]);
+          // Create FormData for file upload
+          const formData = new FormData();
+          formData.append('full_name', candidateName);
+          formData.append('email', `${candidateName.toLowerCase().replace(/\s+/g, '.')}@placeholder.com`);
+          formData.append('cv_file', file);
+          
+          if (jobId) {
+            formData.append('job_posting_id', jobId);
+          }
 
-          if (dbError) throw dbError;
+          // Upload candidate with CV
+          await apiClient.createCandidate(formData);
           successCount++;
 
-        } catch (error) {
+        } catch (error: any) {
           console.error(`Errore importazione ${file.name}:`, error);
           errorCount++;
         }
@@ -241,7 +223,7 @@ export function ImportCandidatesDialog({ jobId, onImportComplete }: ImportCandid
                 <svg className="w-8 h-8" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
                   <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.9 2.5 3.2 3.3l12.3-21.3-6.5-11.3-12.85 22.65c-.7 1.25-1.1 2.65-1.1 4.1s.4 2.85 1.1 4.1z" fill="#0066da"/>
                   <path d="m43.65 25-12.3-21.3c-1.3.8-2.4 1.9-3.2 3.3l-12.85 22.3c-.7 1.25-1.1 2.65-1.1 4.1s.4 2.85 1.1 4.1l6.5 11.3 21.85-37.9z" fill="#00ac47"/>
-                  <path d="m73.55 76.8c1.4-.8 2.5-1.9 3.2-3.3l12.85-22.3c.7-1.25 1.1-2.65 1.1-4.1s-.4-2.85-1.1-4.1l-6.5-11.3-21.4 37.1 11.85 7.9z" fill="#ea4335"/>
+                  <path d="m73.55 76.8c1.4-.8 2.5-1.9 3.2-3.3l12.85-22.3c.7-1.25 1.1-2.65-1.1-4.1s-.4-2.85-1.1-4.1l-6.5-11.3-21.4 37.1 11.85 7.9z" fill="#ea4335"/>
                   <path d="m43.65 25 21.85 37.9 6.5 11.3-11.85-7.9-10-6.65-6.5-11.3-6.5-11.3z" fill="#00832d"/>
                   <path d="m43.65 25-21.85-37.9-12.3 21.3 12.85 22.3 10 6.65 11.3-12.35z" fill="#2684fc"/>
                   <path d="m6.6 66.85 21.4-37.1 10 6.65-11.3 12.35-10 18.1z" fill="#ffba00"/>

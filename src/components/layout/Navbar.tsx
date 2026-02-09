@@ -1,15 +1,30 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { LogOut, LayoutDashboard, Briefcase, Users } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { logout, user } = useAuth();
+  const { toast } = useToast();
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate("/auth");
+    try {
+      await logout();
+      toast({
+        title: "Logout effettuato",
+        description: "A presto!",
+      });
+      navigate("/auth");
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Errore",
+        description: "Errore durante il logout",
+      });
+    }
   };
 
   const isActive = (path: string) => {
@@ -60,7 +75,15 @@ const Navbar = () => {
               </Link>
             </div>
           </div>
-          <div className="flex items-center">
+          <div className="flex items-center gap-4">
+            {user && (
+              <div className="hidden md:flex items-center gap-2 text-sm text-gray-600">
+                <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center font-semibold text-gray-700">
+                  {user.full_name?.charAt(0).toUpperCase() || user.username?.charAt(0).toUpperCase()}
+                </div>
+                <span className="font-medium">{user.full_name || user.username}</span>
+              </div>
+            )}
             <Button
               variant="logout"
               size="sm"

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { apiClient } from "@/lib/api";
+import type { JobPosting } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -10,8 +12,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, ArrowLeft, Briefcase, MapPin, Pencil, Trash2 } from "lucide-react";
+import { Plus, Briefcase, MapPin, Pencil, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { z } from "zod";
+import DashboardLayout from "@/components/layout/DashboardLayout";
 
 const jobPostingSchema = z.object({
   title: z.string().min(3, "Titolo troppo corto").max(100),
@@ -23,25 +37,10 @@ const jobPostingSchema = z.object({
   required_skills: z.array(z.string()),
 });
 
-interface JobPosting {
-  id: string;
-  title: string;
-  description: string;
-  requirements: string;
-  location: string;
-  employment_type: string;
-  status: string;
-  required_experience_years: number;
-  required_skills: string[];
-  salary_range: string | null;
-  created_at: string;
-}
-
-import DashboardLayout from "@/components/layout/DashboardLayout";
-
 const JobPostings = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
   const [jobPostings, setJobPostings] = useState<JobPosting[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -58,25 +57,15 @@ const JobPostings = () => {
   });
 
   useEffect(() => {
-    checkAuth();
-    loadJobPostings();
-  }, []);
-
-  const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      navigate("/auth");
+    if (isAuthenticated) {
+      loadJobPostings();
     }
-  };
+  }, [isAuthenticated]);
 
   const loadJobPostings = async () => {
     try {
-      const { data, error } = await supabase
-        .from("job_postings")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
+      setLoading(true);
+      const data = await apiClient.getJobs();
       setJobPostings(data || []);
     } catch (error) {
       console.error("Errore caricamento posizioni:", error);
@@ -105,49 +94,27 @@ const JobPostings = () => {
         required_skills: skillsArray,
       });
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Utente non autenticato");
+      const payload = {
+        title: validatedData.title,
+        description: validatedData.description,
+        requirements: validatedData.requirements,
+        location: validatedData.location,
+        employment_type: validatedData.employment_type,
+        required_experience_years: validatedData.required_experience_years,
+        required_skills: validatedData.required_skills,
+        salary_range: formData.salary_range || null,
+      };
 
       if (editingId) {
         // Update existing job
-        const { error } = await supabase
-          .from("job_postings")
-          .update({
-            title: validatedData.title,
-            description: validatedData.description,
-            requirements: validatedData.requirements,
-            location: validatedData.location,
-            employment_type: validatedData.employment_type,
-            required_experience_years: validatedData.required_experience_years,
-            required_skills: validatedData.required_skills,
-            salary_range: formData.salary_range || null,
-          })
-          .eq("id", editingId);
-
-        if (error) throw error;
-
+        await apiClient.updateJob(editingId, payload);
         toast({
           title: "Posizione aggiornata",
           description: "La posizione è stata modificata con successo",
         });
       } else {
         // Create new job
-        const { error } = await supabase.from("job_postings").insert([
-          {
-            title: validatedData.title,
-            description: validatedData.description,
-            requirements: validatedData.requirements,
-            location: validatedData.location,
-            employment_type: validatedData.employment_type,
-            required_experience_years: validatedData.required_experience_years,
-            required_skills: validatedData.required_skills,
-            salary_range: formData.salary_range || null,
-            created_by: user.id,
-          },
-        ]);
-
-        if (error) throw error;
-
+        await apiClient.createJob(payload);
         toast({
           title: "Posizione creata",
           description: "La posizione è stata pubblicata con successo",
@@ -172,27 +139,20 @@ const JobPostings = () => {
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm("Sei sicuro di voler eliminare questa posizione?")) return;
 
     try {
-      const { error } = await supabase
-        .from("job_postings")
-        .delete()
-        .eq("id", id);
-
-      if (error) throw error;
-
+      await apiClient.deleteJob(id);
       toast({
         title: "Posizione eliminata",
         description: "La posizione è stata rimossa con successo",
       });
       loadJobPostings();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Errore eliminazione:", error);
       toast({
         variant: "destructive",
         title: "Errore",
-        description: "Impossibile eliminare la posizione",
+        description: error.message || "Impossibile eliminare la posizione",
       });
     }
   };
@@ -431,14 +391,35 @@ const JobPostings = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-gray-400 hover:text-red-600"
-                          onClick={(e) => handleDelete(job.id, e)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-gray-400 hover:text-red-600"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Sei sicuro?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Questa azione non può essere annullata. La posizione verrà rimossa permanentemente.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Annulla</AlertDialogCancel>
+                              <AlertDialogAction
+                                className="bg-red-600 hover:bg-red-700"
+                                onClick={(e) => handleDelete(job.id, e)}
+                              >
+                                Elimina
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </div>
                     </div>
                   </div>

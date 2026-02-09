@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -23,6 +23,8 @@ import {
 import { z } from "zod";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { ImportCandidatesDialog } from "@/components/candidates/ImportCandidatesDialog";
+import { apiClient } from "@/lib/api";
+import type { JobPosting, Candidate } from "@/lib/api";
 
 const candidateSchema = z.object({
   full_name: z.string().min(2, "Nome troppo corto").max(100),
@@ -31,31 +33,10 @@ const candidateSchema = z.object({
   location: z.string().optional(),
 });
 
-interface Candidate {
-  id: string;
-  full_name: string;
-  email: string;
-  phone: string | null;
-  location: string | null;
-  current_status: string;
-  overall_score: number | null;
-  years_of_experience: number | null;
-  created_at: string;
-}
-
-interface JobPosting {
-  id: string;
-  title: string;
-  description: string;
-  requirements: string;
-  location: string;
-  required_skills: string[];
-  created_at: string;
-}
-
 const Candidates = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
   const [searchParams] = useSearchParams();
   const jobId = searchParams.get("job");
 
@@ -66,6 +47,7 @@ const Candidates = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
   
   const [formData, setFormData] = useState({
     full_name: "",
@@ -79,9 +61,10 @@ const Candidates = () => {
   const selectedJob = jobPostings.find(j => j.id === selectedJobId);
 
   useEffect(() => {
-    checkAuth();
-    loadJobPostings();
-  }, []);
+    if (isAuthenticated) {
+      loadJobPostings();
+    }
+  }, [isAuthenticated]);
 
   // Debounce search query
   useEffect(() => {
@@ -92,23 +75,9 @@ const Candidates = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const [analyzing, setAnalyzing] = useState(false);
-
-  const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      navigate("/auth");
-    }
-  };
-
   const loadJobPostings = async () => {
     try {
-      const { data, error } = await supabase
-        .from("job_postings")
-        .select("*") // Fetch all fields to show details
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
+      const data = await apiClient.getJobs();
       setJobPostings(data || []);
       
       if (data && data.length > 0 && !selectedJobId) {
@@ -116,6 +85,11 @@ const Candidates = () => {
       }
     } catch (error) {
       console.error("Errore caricamento posizioni:", error);
+      toast({
+        variant: "destructive",
+        title: "Errore",
+        description: "Impossibile caricare le posizioni",
+      });
     }
   };
 
@@ -124,35 +98,11 @@ const Candidates = () => {
     
     setLoading(true);
     try {
-      // Build the query
-      let query: any = supabase
-        .from("candidate_scores")
-        .select(`
-          overall_score,
-          candidate:candidates!inner(*)
-        `)
-        .eq("job_posting_id", selectedJobId)
-        .order("overall_score", { ascending: false });
-
-      // Apply search filter if query exists
-      if (debouncedSearchQuery) {
-        // We use !inner join to filter by candidate fields
-        // The syntax for OR across columns in a joined table:
-        // We reference the alias 'candidate' and the columns
-        query = query.or(`full_name.ilike.%${debouncedSearchQuery}%,cv_text_content.ilike.%${debouncedSearchQuery}%`, { foreignTable: "candidate" });
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-
-      // Transform data to match Candidate interface
-      const formattedCandidates: Candidate[] = (data || []).map((item: any) => ({
-        ...item.candidate,
-        overall_score: item.overall_score,
-      }));
-
-      setCandidates(formattedCandidates);
+      const data = await apiClient.getCandidates(
+        selectedJobId,
+        debouncedSearchQuery || undefined
+      );
+      setCandidates(data || []);
     } catch (error) {
       console.error("Errore caricamento candidati:", error);
       toast({
@@ -172,41 +122,29 @@ const Candidates = () => {
     if (!silent) {
       toast({
         title: "Analisi avviata",
-        description: "L'analisi dei CV è in corso. Potrebbe richiedere qualche minuto...",
+        description: "L'analisi dei CV è in corso...",
       });
     }
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || "";
-      const response = await fetch(`${apiUrl}/api/analyze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ job_id: selectedJobId }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Errore nella comunicazione con il server");
-      }
-
-      const result = await response.json();
+      await apiClient.analyzeResumes(selectedJobId);
       
       if (!silent) {
         toast({
-          title: "Analisi completata",
-          description: "I punteggi sono stati aggiornati.",
+          title: "Analisi avviata",
+          description: "I CV verranno analizzati in background.",
         });
       }
       
-      loadCandidates();
+      // Ricarica dopo un delay
+      setTimeout(() => loadCandidates(), 2000);
     } catch (error) {
       console.error("Errore analisi:", error);
       if (!silent) {
         toast({
           variant: "destructive",
           title: "Errore",
-          description: "Impossibile completare l'analisi. Assicurati che il backend sia in esecuzione.",
+          description: error instanceof Error ? error.message : "Errore nell'analisi",
         });
       }
     } finally {
@@ -219,7 +157,6 @@ const Candidates = () => {
       loadCandidates();
       
       // Check if we need to run initial analysis
-      // We use a key specific to the job to avoid running it multiple times for the same job in the session
       const hasRunInitialAnalysis = sessionStorage.getItem(`initialAnalysisRun_${selectedJobId}`);
       if (!hasRunInitialAnalysis) {
         triggerAnalysis(true);
@@ -234,51 +171,15 @@ const Candidates = () => {
     try {
       candidateSchema.parse(formData);
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Utente non autenticato");
+      const formDataToSend = new FormData();
+      formDataToSend.append('full_name', formData.full_name);
+      formDataToSend.append('email', formData.email);
+      if (formData.phone) formDataToSend.append('phone', formData.phone);
+      if (formData.location) formDataToSend.append('location', formData.location);
+      if (selectedJobId) formDataToSend.append('job_posting_id', selectedJobId);
+      if (formData.cv_file) formDataToSend.append('cv_file', formData.cv_file);
 
-      // Check for duplicate email
-      const { data: existingCandidate } = await supabase
-        .from("candidates")
-        .select("id")
-        .eq("email", formData.email)
-        .maybeSingle();
-
-      if (existingCandidate) {
-        throw new Error("Un candidato con questa email esiste già.");
-      }
-
-      let cvUrl = null;
-      if (formData.cv_file) {
-        const fileExt = formData.cv_file.name.split(".").pop();
-        const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from("cv-files")
-          .upload(fileName, formData.cv_file);
-
-        if (uploadError) throw uploadError;
-
-        const { data: { publicUrl } } = supabase.storage
-          .from("cv-files")
-          .getPublicUrl(fileName);
-
-        cvUrl = publicUrl;
-      }
-
-      const { error } = await supabase.from("candidates").insert([
-        {
-          job_posting_id: selectedJobId, // Optional: link to job if needed, or null
-          full_name: formData.full_name,
-          email: formData.email,
-          phone: formData.phone || null,
-          location: formData.location || null,
-          cv_file_url: cvUrl,
-          added_by: user.id,
-        },
-      ]);
-
-      if (error) throw error;
+      await apiClient.createCandidate(formDataToSend);
 
       toast({
         title: "Candidato aggiunto",
@@ -286,7 +187,6 @@ const Candidates = () => {
       });
 
       setDialogOpen(false);
-      // Trigger analysis after upload
       triggerAnalysis(false);
       
       setFormData({
@@ -305,34 +205,11 @@ const Candidates = () => {
     }
   };
 
-
   const handleDeleteCandidate = async (candidateId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
     try {
-      // Delete scores first
-      const { error: scoresError } = await supabase
-        .from("candidate_scores")
-        .delete()
-        .eq("candidate_id", candidateId);
-
-      if (scoresError) console.error("Error deleting scores:", scoresError);
-
-      // Delete status history
-      const { error: historyError } = await supabase
-        .from("candidate_status_history")
-        .delete()
-        .eq("candidate_id", candidateId);
-
-      if (historyError) console.error("Error deleting history:", historyError);
-
-      // Delete candidate
-      const { error } = await supabase
-        .from("candidates")
-        .delete()
-        .eq("id", candidateId);
-
-      if (error) throw error;
+      await apiClient.deleteCandidate(candidateId);
 
       toast({
         title: "Candidato eliminato",
@@ -344,7 +221,7 @@ const Candidates = () => {
       toast({
         variant: "destructive",
         title: "Errore",
-        description: "Impossibile eliminare il candidato",
+        description: error.message || "Impossibile eliminare il candidato",
       });
     }
   };
@@ -365,137 +242,137 @@ const Candidates = () => {
     <DashboardLayout>
       <div className="p-8 max-w-7xl mx-auto space-y-8">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 gap-4">
-              <div className="flex items-center gap-6 flex-1 w-full md:w-auto">
-                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 whitespace-nowrap">
-                  <Users className="h-5 w-5 text-gray-500" />
-                  Candidati
-                  <span className="ml-2 text-sm font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                    {candidates.length}
-                  </span>
-                </h3>
-                
-                {/* Search Bar */}
-                <div className="relative w-full max-w-md">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input 
-                    placeholder="Cerca per nome o contenuto CV..." 
-                    className="pl-10 h-10 rounded-xl bg-gray-50 border-gray-200 focus:bg-white transition-all w-full"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2 w-full md:w-auto justify-end">
-                <ImportCandidatesDialog 
-                  jobId={selectedJobId} 
-                  onImportComplete={() => triggerAnalysis(false)} 
-                />
-                <Button 
-                  onClick={() => triggerAnalysis(false)} 
-                  disabled={analyzing || !selectedJobId}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-900/20"
-                >
-                  {analyzing ? (
-                    <>
-                      <span className="animate-spin mr-2">⏳</span>
-                      Analisi in corso...
-                    </>
-                  ) : (
-                    <>
-                      <FileText className="mr-2 h-4 w-4" />
-                      Analizza CV
-                    </>
-                  )}
-                </Button>
-                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button disabled={!selectedJobId} className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl shadow-lg shadow-gray-900/20">
-                      <Upload className="mr-2 h-4 w-4" />
-                      Aggiungi
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-md rounded-[20px]">
-                    <DialogHeader>
-                      <DialogTitle className="text-xl font-bold">Aggiungi Candidato</DialogTitle>
-                      <DialogDescription>
-                        Inserisci i dati del candidato e carica il CV
-                      </DialogDescription>
-                    </DialogHeader>
-                    <form onSubmit={handleUploadCandidate} className="space-y-4 mt-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="full_name">Nome Completo *</Label>
-                        <Input
-                          id="full_name"
-                          value={formData.full_name}
-                          onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                          placeholder="Mario Rossi"
-                          required
-                          className="rounded-xl"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="email">Email *</Label>
-                        <Input
-                          id="email"
-                          type="email"
-                          value={formData.email}
-                          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                          placeholder="mario.rossi@email.com"
-                          required
-                          className="rounded-xl"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="phone">Telefono</Label>
-                        <Input
-                          id="phone"
-                          type="tel"
-                          value={formData.phone}
-                          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                          placeholder="+39 333 1234567"
-                          className="rounded-xl"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="location">Località</Label>
-                        <Input
-                          id="location"
-                          value={formData.location}
-                          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                          placeholder="Milano, Italia"
-                          className="rounded-xl"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="cv_file">CV (PDF)</Label>
-                        <Input
-                          id="cv_file"
-                          type="file"
-                          accept=".pdf"
-                          onChange={(e) => setFormData({ ...formData, cv_file: e.target.files?.[0] || null })}
-                          className="rounded-xl file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 file:mr-4 hover:file:bg-gray-200"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Carica il curriculum in formato PDF
-                        </p>
-                      </div>
-
-                      <div className="flex justify-end gap-2 pt-4">
-                        <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl">
-                          Annulla
-                        </Button>
-                        <Button type="submit" className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl">Aggiungi</Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
+          <div className="flex items-center gap-6 flex-1 w-full md:w-auto">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 whitespace-nowrap">
+              <Users className="h-5 w-5 text-gray-500" />
+              Candidati
+              <span className="ml-2 text-sm font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                {candidates.length}
+              </span>
+            </h3>
+            
+            {/* Search Bar */}
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input 
+                placeholder="Cerca per nome o contenuto CV..." 
+                className="pl-10 h-10 rounded-xl bg-gray-50 border-gray-200 focus:bg-white transition-all w-full"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
+          </div>
+
+          <div className="flex gap-2 w-full md:w-auto justify-end">
+            <ImportCandidatesDialog 
+              jobId={selectedJobId} 
+              onImportComplete={() => triggerAnalysis(false)} 
+            />
+            <Button 
+              onClick={() => triggerAnalysis(false)} 
+              disabled={analyzing || !selectedJobId}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-900/20"
+            >
+              {analyzing ? (
+                <>
+                  <span className="animate-spin mr-2">⏳</span>
+                  Analisi in corso...
+                </>
+              ) : (
+                <>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Analizza CV
+                </>
+              )}
+            </Button>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger asChild>
+                <Button disabled={!selectedJobId} className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl shadow-lg shadow-gray-900/20">
+                  <Upload className="mr-2 h-4 w-4" />
+                  Aggiungi
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md rounded-[20px]">
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-bold">Aggiungi Candidato</DialogTitle>
+                  <DialogDescription>
+                    Inserisci i dati del candidato e carica il CV
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleUploadCandidate} className="space-y-4 mt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="full_name">Nome Completo *</Label>
+                    <Input
+                      id="full_name"
+                      value={formData.full_name}
+                      onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                      placeholder="Mario Rossi"
+                      required
+                      className="rounded-xl"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email *</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      placeholder="mario.rossi@email.com"
+                      required
+                      className="rounded-xl"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Telefono</Label>
+                    <Input
+                      id="phone"
+                      type="tel"
+                      value={formData.phone}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      placeholder="+39 333 1234567"
+                      className="rounded-xl"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="location">Località</Label>
+                    <Input
+                      id="location"
+                      value={formData.location}
+                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                      placeholder="Milano, Italia"
+                      className="rounded-xl"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="cv_file">CV (PDF)</Label>
+                    <Input
+                      id="cv_file"
+                      type="file"
+                      accept=".pdf"
+                      onChange={(e) => setFormData({ ...formData, cv_file: e.target.files?.[0] || null })}
+                      className="rounded-xl file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 file:mr-4 hover:file:bg-gray-200"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Carica il curriculum in formato PDF
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl">
+                      Annulla
+                    </Button>
+                    <Button type="submit" className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl">Aggiungi</Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left Column: Job Selection & Details (4 cols) */}

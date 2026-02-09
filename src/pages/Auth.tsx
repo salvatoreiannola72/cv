@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,25 +16,16 @@ const authSchema = z.object({
 const Auth = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { login, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        navigate("/dashboard");
-      }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        navigate("/dashboard");
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, [navigate]);
+    if (isAuthenticated) {
+      navigate("/dashboard");
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,12 +34,14 @@ const Auth = () => {
       authSchema.parse({ email, password });
       setLoading(true);
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      await login(email, password);
+      
+      toast({
+        title: "Accesso effettuato",
+        description: "Benvenuto!",
       });
-
-      if (error) throw error;
+      
+      navigate("/dashboard");
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -64,7 +57,7 @@ const Auth = () => {
     <div className="min-h-screen flex items-center justify-center bg-[#F9FAFB]">
       <Card className="w-full max-w-md border-none shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] rounded-[20px]">
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-2xl font-bold tracking-tight text-gray-900">SkillMatch</CardTitle>
+          <CardTitle className="text-2xl font-bold tracking-tight text-gray-900">HireSign</CardTitle>
           <CardDescription className="text-gray-500">
             Piattaforma di gestione candidature
           </CardDescription>

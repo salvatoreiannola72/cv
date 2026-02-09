@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, Candidate, CandidateScore } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useToast } from "@/hooks/use-toast";
 
 interface CandidateDetail {
   id: string;
@@ -33,30 +33,15 @@ interface CandidateDetail {
   cv_file_url: string | null;
 }
 
-interface CandidateScore {
-  id: string;
-  job_posting_id: string;
-  overall_score: number;
-  education_score: number;
-  experience_score: number;
-  skills_score: number;
-  location_score: number;
-  score_details: any;
-  job_posting: {
-    title: string;
-  };
-}
-
 const CandidateDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const [candidate, setCandidate] = useState<CandidateDetail | null>(null);
+  const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [scores, setScores] = useState<CandidateScore[]>([]);
   const [selectedScore, setSelectedScore] = useState<CandidateScore | null>(null);
   const [loading, setLoading] = useState(true);
-  const [signedCvUrl, setSignedCvUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -64,92 +49,41 @@ const CandidateDetail = () => {
     }
   }, [id]);
 
-  useEffect(() => {
-    const generateSignedUrl = async () => {
-      if (candidate?.cv_file_url) {
-        try {
-          // Check if it's a Supabase storage URL and extract path
-          // Typical format: .../storage/v1/object/public/cv-files/path/to/file
-          if (candidate.cv_file_url.includes('/cv-files/')) {
-            const path = candidate.cv_file_url.split('/cv-files/')[1];
-            if (path) {
-              // Generate signed URL valid for 1 hour
-              const { data, error } = await supabase.storage
-                .from('cv-files')
-                .createSignedUrl(path, 3600);
-
-              if (error) throw error;
-              if (data?.signedUrl) {
-                setSignedCvUrl(data.signedUrl);
-                return;
-              }
-            }
-          }
-        } catch (error) {
-          console.error("Error generating signed URL:", error);
-        }
-        // Fallback to original URL
-        setSignedCvUrl(candidate.cv_file_url);
-      } else {
-        setSignedCvUrl(null);
-      }
-    };
-
-    generateSignedUrl();
-  }, [candidate]);
-
   const loadCandidateData = async () => {
     try {
-      // Fetch candidate info
-      const { data: candidateData, error: candidateError } = await supabase
-        .from("candidates")
-        .select("*")
-        .eq("id", id)
-        .single();
+      setLoading(true);
 
-      if (candidateError) throw candidateError;
-      setCandidate(candidateData);
+      // Fetch candidate detail with scores
+      const data = await apiClient.getCandidateDetail(id!);
+      
+      setCandidate(data.candidate);
+      
+      // Sort scores by overall_score descending
+      const sortedScores = (data.scores || []).sort(
+        (a: CandidateScore, b: CandidateScore) => b.overall_score - a.overall_score
+      );
+      setScores(sortedScores);
 
-      // Fetch scores with job details
-      const { data: scoreData, error: scoreError } = await supabase
-        .from("candidate_scores")
-        .select(`
-          *,
-          job_posting:job_postings(title)
-        `)
-        .eq("candidate_id", id);
+      // Select score based on jobId from navigation state or highest score
+      const stateJobId = location.state?.jobId;
+      let scoreToSelect: CandidateScore | undefined;
 
-      if (!scoreError && scoreData) {
-        const scoresList = scoreData as unknown as CandidateScore[];
-        // Sort by overall_score descending
-        scoresList.sort((a, b) => b.overall_score - a.overall_score);
-        
-        setScores(scoresList);
-        
-        // Check for jobId in navigation state
-        const stateJobId = location.state?.jobId;
-        
-        if (scoresList.length > 0) {
-          let scoreToSelect: CandidateScore | undefined;
-
-          if (stateJobId) {
-            scoreToSelect = scoresList.find(s => s.job_posting_id === stateJobId);
-          }
-
-          if (!scoreToSelect) {
-             // Default to the highest score (first in list)
-             scoreToSelect = scoresList[0];
-          }
-          
-          setSelectedScore(scoreToSelect);
-        }
+      if (stateJobId && sortedScores.length > 0) {
+        scoreToSelect = sortedScores.find((s: CandidateScore) => s.job_posting_id === stateJobId);
       }
-    } catch (error) {
+
+      if (!scoreToSelect && sortedScores.length > 0) {
+        scoreToSelect = sortedScores[0];
+      }
+
+      setSelectedScore(scoreToSelect || null);
+
+    } catch (error: any) {
       console.error("Errore caricamento dati:", error);
       toast({
         variant: "destructive",
         title: "Errore",
-        description: "Impossibile caricare i dettagli del candidato",
+        description: error.message || "Impossibile caricare i dettagli del candidato",
       });
     } finally {
       setLoading(false);
@@ -160,29 +94,7 @@ const CandidateDetail = () => {
     if (!candidate) return;
 
     try {
-      // Delete scores first
-      const { error: scoresError } = await supabase
-        .from("candidate_scores")
-        .delete()
-        .eq("candidate_id", candidate.id);
-
-      if (scoresError) console.error("Error deleting scores:", scoresError);
-
-      // Delete status history
-      const { error: historyError } = await supabase
-        .from("candidate_status_history")
-        .delete()
-        .eq("candidate_id", candidate.id);
-
-      if (historyError) console.error("Error deleting history:", historyError);
-
-      // Delete candidate
-      const { error } = await supabase
-        .from("candidates")
-        .delete()
-        .eq("id", candidate.id);
-
-      if (error) throw error;
+      await apiClient.deleteCandidate(candidate.id);
 
       toast({
         title: "Candidato eliminato",
@@ -194,7 +106,7 @@ const CandidateDetail = () => {
       toast({
         variant: "destructive",
         title: "Errore",
-        description: "Impossibile eliminare il candidato",
+        description: error.message || "Impossibile eliminare il candidato",
       });
     }
   };
@@ -293,9 +205,9 @@ const CandidateDetail = () => {
                   </AlertDialog>
                 </div>
 
-                {signedCvUrl && (
+                {candidate.cv_file_url && (
                   <Button variant="outline" className="rounded-xl gap-2 w-full sm:w-auto" asChild>
-                    <a href={signedCvUrl} target="_blank" rel="noopener noreferrer">
+                    <a href={candidate.cv_file_url} target="_blank" rel="noopener noreferrer">
                       <Download className="h-4 w-4" />
                       Scarica CV
                     </a>
@@ -564,9 +476,9 @@ const CandidateDetail = () => {
               <CardHeader className="border-b bg-gray-50/50">
                 <div className="flex justify-between items-center">
                   <CardTitle className="text-lg font-semibold">Curriculum Vitae</CardTitle>
-                  {signedCvUrl && (
+                  {candidate.cv_file_url && (
                     <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700" asChild>
-                      <a href={signedCvUrl} target="_blank" rel="noopener noreferrer">
+                      <a href={candidate.cv_file_url} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="h-4 w-4 mr-2" />
                         Apri in nuova scheda
                       </a>
@@ -575,9 +487,9 @@ const CandidateDetail = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-0 h-full bg-gray-100">
-                {signedCvUrl ? (
+                {candidate.cv_file_url ? (
                   <iframe 
-                    src={signedCvUrl} 
+                    src={candidate.cv_file_url} 
                     className="w-full h-full" 
                     title="CV Preview"
                   />
