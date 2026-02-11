@@ -115,7 +115,7 @@ class ApiClient {
     }
 
     async createJob(data: Partial<JobPosting>) {
-        return this.request<JobPosting>('/api/jobs/create', {
+        return this.request<JobPosting>('/api/jobs', {
             method: 'POST',
             body: JSON.stringify(data),
         });
@@ -123,13 +123,13 @@ class ApiClient {
 
     async updateJob(jobId: string, data: Partial<JobPosting>) {
         return this.request<JobPosting>(`/api/jobs/${jobId}`, {
-            method: 'PUT',
+            method: 'PATCH',
             body: JSON.stringify(data),
         });
     }
 
     async deleteJob(jobId: string) {
-        return this.request<void>(`/api/jobs/${jobId}/delete`, {
+        return this.request<void>(`/api/jobs/${jobId}`, {
             method: 'DELETE',
         });
     }
