@@ -1,3 +1,5 @@
+import { number } from "zod";
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 class ApiClient {
@@ -62,9 +64,29 @@ class ApiClient {
 
     // Candidates
     async getCandidates(jobId: string, search?: string) {
-        const params = new URLSearchParams({ job_id: jobId });
-        if (search) params.append('search', search);
-        return this.request<Candidate[]>(`/api/candidates?${params}`);
+        const params = new URLSearchParams({ job_posting: jobId });
+        // todo: da implementare ricerca if (search) params.append('search', search);
+        const data = await this.request<any[]>(`/api/candidate_scores?${params}`);
+        const result = data.map((item) => ({
+            "id": item.candidate.id,
+            "email": "chiara.neri@email.it",
+            "phone": "+39 335 XXXXXXX",
+            "skills": [],
+            "added_by": "4c9ef08a-1fea-402b-8bd7-b21ca4c3762f",
+            "location": null,
+            "full_name": "Chiara Neri",
+            "created_at": "2025-11-26T18:37:53.91543+00:00",
+            "updated_at": "2025-11-26T19:28:21.06077+00:00",
+            "cv_file_url": "https://cvvlfjjtnsjwhvwgjtav.supabase.co/storage/v1/object/public/cv-files/4c9ef08a-1fea-402b-8bd7-b21ca4c3762f/1764182273118_9.pdf",
+            "current_status": "new",
+            "job_posting_id": "a37e0736-f50c-45de-a6dc-0be5c00aa06b",
+            "cv_text_content": null,
+            "education_level": "Master",
+            "years_of_experience": 3,
+            "overall_score": 70.0,
+        }));
+        console.log('Mapped candidates:', result);
+        return result;
     }
 
     async createCandidate(data: FormData) {
@@ -165,6 +187,11 @@ export interface Candidate {
     cv_file_url: string;
     education_level: string | null;
     skills: string[];
+}
+
+export interface CandidateScore {
+    overall_score: number;
+    candidate: Candidate;
 }
 
 // Aggiungi questo type
