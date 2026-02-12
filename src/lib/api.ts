@@ -67,23 +67,19 @@ class ApiClient {
         const params = new URLSearchParams({ job_posting: jobId });
         // todo: da implementare ricerca if (search) params.append('search', search);
         const data = await this.request<any[]>(`/api/candidate_scores?${params}`);
-        const result = data.map((item) => ({
-            "id": item.candidate.id,
-            "email": "chiara.neri@email.it",
-            "phone": "+39 335 XXXXXXX",
-            "skills": [],
-            "added_by": "4c9ef08a-1fea-402b-8bd7-b21ca4c3762f",
-            "location": null,
-            "full_name": "Chiara Neri",
-            "created_at": "2025-11-26T18:37:53.91543+00:00",
-            "updated_at": "2025-11-26T19:28:21.06077+00:00",
-            "cv_file_url": "https://cvvlfjjtnsjwhvwgjtav.supabase.co/storage/v1/object/public/cv-files/4c9ef08a-1fea-402b-8bd7-b21ca4c3762f/1764182273118_9.pdf",
-            "current_status": "new",
-            "job_posting_id": "a37e0736-f50c-45de-a6dc-0be5c00aa06b",
-            "cv_text_content": null,
-            "education_level": "Master",
-            "years_of_experience": 3,
-            "overall_score": 70.0,
+        const result: Candidate[] = data.map((item) => ({
+            id: item.candidate.id,
+            full_name: item.candidate.full_name,
+            email: item.candidate.email,
+            phone: item.candidate.phone ?? null,
+            location: item.candidate.location ?? null,
+            current_status: item.candidate.current_status || 'new',
+            overall_score: Number(item.overall_score) || 0,
+            years_of_experience: Number(item.candidate.years_of_experience) || 0,
+            created_at: item.candidate.created_at,
+            cv_file_url: item.candidate.cv_file_url,
+            education_level: item.education_score ?? null,
+            skills: item.candidate.skills || []
         }));
         console.log('Mapped candidates:', result);
         return result;
