@@ -42,6 +42,8 @@ const CandidateDetail = () => {
   const [scores, setScores] = useState<CandidateScore[]>([]);
   const [selectedScore, setSelectedScore] = useState<CandidateScore | null>(null);
   const [loading, setLoading] = useState(true);
+  const [cvUrl, setCvUrl] = useState<string | null>(null);
+  const [cvUrlLoading, setCvUrlLoading] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -49,15 +51,21 @@ const CandidateDetail = () => {
     }
   }, [id]);
 
+  useEffect(() => {
+    if (candidate) {
+      loadCVUrl();
+    }
+  }, [candidate?.id]);
+
   const loadCandidateData = async () => {
     try {
       setLoading(true);
 
       // Fetch candidate detail with scores
       const data = await apiClient.getCandidateDetail(id!);
-      
+
       setCandidate(data.candidate);
-      
+
       // Sort scores by overall_score descending
       const sortedScores = (data.scores || []).sort(
         (a: CandidateScore, b: CandidateScore) => b.overall_score - a.overall_score
@@ -87,6 +95,23 @@ const CandidateDetail = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCVUrl = async () => {
+    if (!candidate?.cv_file_url) return;
+    try {
+      setCvUrlLoading(true);
+      const url = await apiClient.getCVDownloadUrl(candidate.id);
+      setCvUrl(url);
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Errore",
+        description: "Impossibile generare il link di download del CV",
+      });
+    } finally {
+      setCvUrlLoading(false);
     }
   };
 
@@ -154,16 +179,16 @@ const CandidateDetail = () => {
   return (
     <DashboardLayout>
       <div className="p-8 max-w-7xl mx-auto space-y-8">
-        
+
         {/* Top Section: Profile, Contacts, Score Details */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
+
           {/* Column 1: Profile Info */}
           <div className="flex items-start gap-4">
             <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="rounded-full shrink-0 -ml-14 bg-white">
               <ArrowLeft className="h-6 w-6" />
             </Button>
-            
+
             <Card className="border-none shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] rounded-[20px] h-full flex-1">
               <div className="p-6 space-y-4">
                 <div className="flex justify-between items-start">
@@ -206,11 +231,14 @@ const CandidateDetail = () => {
                 </div>
 
                 {candidate.cv_file_url && (
-                  <Button variant="outline" className="rounded-xl gap-2 w-full sm:w-auto" asChild>
-                    <a href={candidate.cv_file_url} target="_blank" rel="noopener noreferrer">
-                      <Download className="h-4 w-4" />
-                      Scarica CV
-                    </a>
+                  <Button
+                    variant="outline"
+                    className="rounded-xl gap-2 w-full sm:w-auto"
+                    onClick={() => cvUrl && window.open(cvUrl, '_blank')}
+                    disabled={cvUrlLoading || !cvUrl}
+                  >
+                    <Download className="h-4 w-4" />
+                    {cvUrlLoading ? "Caricamento..." : "Scarica CV"}
                   </Button>
                 )}
               </div>
@@ -264,34 +292,33 @@ const CandidateDetail = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center gap-4">
-                   <div className={`
+                  <div className={`
                       relative flex items-center justify-center w-16 h-16 rounded-full border-4 shrink-0
-                      ${selectedScore.overall_score >= 80 ? "border-green-100 bg-green-50" : 
-                        selectedScore.overall_score >= 60 ? "border-yellow-100 bg-yellow-50" : "border-red-100 bg-red-50"}
+                      ${selectedScore.overall_score >= 80 ? "border-green-100 bg-green-50" :
+                      selectedScore.overall_score >= 60 ? "border-yellow-100 bg-yellow-50" : "border-red-100 bg-red-50"}
                     `}>
-                      <span className={`text-xl font-bold ${
-                        selectedScore.overall_score >= 80 ? "text-green-700" : 
-                        selectedScore.overall_score >= 60 ? "text-yellow-700" : "text-red-700"
+                    <span className={`text-xl font-bold ${selectedScore.overall_score >= 80 ? "text-green-700" :
+                      selectedScore.overall_score >= 60 ? "text-yellow-700" : "text-red-700"
                       }`}>
-                        {selectedScore.overall_score.toFixed(0)}
-                      </span>
-                    </div>
-                    <div className="flex-1 space-y-2">
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs text-gray-500">
-                          <span>Exp</span>
-                          <span>{selectedScore.experience_score}%</span>
-                        </div>
-                        <Progress value={selectedScore.experience_score} className="h-1.5 bg-gray-100" />
+                      {selectedScore.overall_score.toFixed(0)}
+                    </span>
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>Exp</span>
+                        <span>{selectedScore.experience_score}%</span>
                       </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs text-gray-500">
-                          <span>Skills</span>
-                          <span>{selectedScore.skills_score}%</span>
-                        </div>
-                        <Progress value={selectedScore.skills_score} className="h-1.5 bg-gray-100" />
-                      </div>
+                      <Progress value={selectedScore.experience_score} className="h-1.5 bg-gray-100" />
                     </div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>Skills</span>
+                        <span>{selectedScore.skills_score}%</span>
+                      </div>
+                      <Progress value={selectedScore.skills_score} className="h-1.5 bg-gray-100" />
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -316,9 +343,8 @@ const CandidateDetail = () => {
                     <div
                       key={score.id}
                       onClick={() => setSelectedScore(score)}
-                      className={`p-3 rounded-xl cursor-pointer transition-colors flex justify-between items-center ${
-                        selectedScore?.id === score.id ? "bg-gray-900 text-white" : "bg-gray-50 hover:bg-gray-100 text-gray-900"
-                      }`}
+                      className={`p-3 rounded-xl cursor-pointer transition-colors flex justify-between items-center ${selectedScore?.id === score.id ? "bg-gray-900 text-white" : "bg-gray-50 hover:bg-gray-100 text-gray-900"
+                        }`}
                     >
                       <span className="font-medium text-sm truncate max-w-[180px]">{score.job_posting?.title}</span>
                       <span className={`font-bold ${selectedScore?.id === score.id ? "text-white" : "text-gray-900"}`}>
@@ -351,7 +377,7 @@ const CandidateDetail = () => {
 
           {/* Right Column: Analysis & CV */}
           <div className="lg:col-span-2 space-y-6">
-            
+
             {/* Professional Summary */}
             <Card className="border-none shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] rounded-[20px] bg-gradient-to-br from-white to-gray-50">
               <CardHeader>
@@ -370,7 +396,7 @@ const CandidateDetail = () => {
             {/* Flags Section */}
             {selectedScore && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 <Card className="border-none shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] rounded-[20px] bg-green-50/50">
+                <Card className="border-none shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] rounded-[20px] bg-green-50/50">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-md font-semibold text-green-800 flex items-center gap-2">
                       <ThumbsUp className="h-5 w-5 text-green-600" />
@@ -477,22 +503,33 @@ const CandidateDetail = () => {
                 <div className="flex justify-between items-center">
                   <CardTitle className="text-lg font-semibold">Curriculum Vitae</CardTitle>
                   {candidate.cv_file_url && (
-                    <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700" asChild>
-                      <a href={candidate.cv_file_url} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        Apri in nuova scheda
-                      </a>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-blue-600 hover:text-blue-700"
+                      onClick={() => cvUrl && window.open(cvUrl, '_blank')}
+                      disabled={cvUrlLoading || !cvUrl}
+                    >
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Apri in nuova scheda
                     </Button>
                   )}
                 </div>
               </CardHeader>
               <CardContent className="p-0 h-full bg-gray-100">
                 {candidate.cv_file_url ? (
-                  <iframe 
-                    src={candidate.cv_file_url} 
-                    className="w-full h-full" 
-                    title="CV Preview"
-                  />
+                  cvUrl ? (
+                    <iframe
+                      src={cvUrl}
+                      className="w-full h-full"
+                      title="CV Preview"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                      <FileText className="h-16 w-16 mb-4 opacity-20" />
+                      <p>{cvUrlLoading ? "Caricamento anteprima..." : "Anteprima non disponibile"}</p>
+                    </div>
+                  )
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-gray-400">
                     <FileText className="h-16 w-16 mb-4 opacity-20" />

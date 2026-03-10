@@ -65,7 +65,7 @@ class ApiClient {
     // Candidates
     async getCandidates(jobId: string, search?: string) {
         const params = new URLSearchParams({ job_posting: jobId });
-        if(search) params.append('search', search);
+        if (search) params.append('search', search);
         const data = await this.request<any[]>(`/api/candidate_scores?${params}`);
         const result: Candidate[] = data.map((item) => ({
             id: item.candidate.id,
@@ -130,6 +130,13 @@ class ApiClient {
             candidate: Candidate & { skills: string[] };
             scores: CandidateScore[];
         }>(`/api/candidates/${candidateId}/detail`);
+    }
+
+    async getCVDownloadUrl(candidateId: string): Promise<string> {
+        const data = await this.request<{ url: string }>(
+            `/api/candidates/${candidateId}/cv-download`
+        );
+        return data.url;
     }
 
     async createJob(data: Partial<JobPosting>) {
