@@ -65,7 +65,7 @@ class ApiClient {
     // Candidates
     async getCandidates(jobId: string, search?: string) {
         const params = new URLSearchParams({ job_posting: jobId });
-        // todo: da implementare ricerca if (search) params.append('search', search);
+        if(search) params.append('search', search);
         const data = await this.request<any[]>(`/api/candidate_scores?${params}`);
         const result: Candidate[] = data.map((item) => ({
             id: item.candidate.id,
