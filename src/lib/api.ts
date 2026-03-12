@@ -122,6 +122,7 @@ class ApiClient {
             open_positions: number;
             total_candidates: number;
             top_candidates: TopCandidate[];
+            candidates: Candidate[];
         }>('/api/dashboard/stats');
     }
 

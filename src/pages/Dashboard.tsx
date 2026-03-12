@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { apiClient, JobPosting, TopCandidate } from "@/lib/api";
+import { apiClient, JobPosting, TopCandidate, Candidate } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Briefcase, Users, ArrowRight } from "lucide-react";
@@ -19,7 +19,8 @@ const Dashboard = () => {
     totalCandidates: 0,
   });
   const [openJobs, setOpenJobs] = useState<JobPosting[]>([]);
-  const [topCandidates, setTopCandidates] = useState<TopCandidate[]>([]);
+  //const [topCandidates, setTopCandidates] = useState<TopCandidate[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -42,7 +43,8 @@ const Dashboard = () => {
         openPositions: dashboardStats.open_positions,
         totalCandidates: dashboardStats.total_candidates,
       });
-      setTopCandidates(dashboardStats.top_candidates || []);
+      //setTopCandidates(dashboardStats.top_candidates || []);
+      setCandidates(dashboardStats.candidates || []);
 
     } catch (error) {
       console.error("Errore caricamento dashboard:", error);
@@ -151,38 +153,26 @@ const Dashboard = () => {
                   <div className="text-center py-8 text-gray-500">
                     Caricamento...
                   </div>
-                ) : topCandidates.length === 0 ? (
+                ) : candidates.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     Nessun candidato trovato
                   </div>
                 ) : (
-                  topCandidates.map((item, index) => (
+                  candidates.map((item, index) => (
                     <div
                       key={index}
-                      onClick={() => navigate(`/candidate/${item.candidate.id}`)}
+                      onClick={() => navigate(`/candidate/${item.id}`)}
                       className="p-4 hover:bg-gray-50 cursor-pointer transition-colors flex items-center justify-between"
                     >
                       <div className="flex items-center gap-4">
                         <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-semibold">
-                          {item.candidate.full_name?.charAt(0) || "?"}
+                          {item.full_name?.charAt(0) || "?"}
                         </div>
                         <div>
-                          <h4 className="font-medium text-gray-900">{item.candidate.full_name}</h4>
-                          <p className="text-xs text-gray-500">
-                            {item.job_posting?.title || "Posizione sconosciuta"}
-                          </p>
+                          <h4 className="font-medium text-gray-900">{item.full_name}</h4>
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
-                        {item.overall_score !== null && (
-                          <div className="flex items-center gap-1">
-                            <span className={`text-sm font-bold ${item.overall_score >= 80 ? "text-green-600" :
-                                item.overall_score >= 60 ? "text-yellow-600" : "text-gray-600"
-                              }`}>
-                              {item.overall_score.toFixed(0)}%
-                            </span>
-                          </div>
-                        )}
                         <ArrowRight className="h-4 w-4 text-gray-300" />
                       </div>
                     </div>
